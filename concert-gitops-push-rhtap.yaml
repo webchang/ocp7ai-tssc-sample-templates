@@ -1,0 +1,90 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: gitops-push
+spec:
+  params:
+    - description: Gitops repo url
+      name: git-url
+      type: string
+    - default: ""
+      description: Gitops repo revision
+      name: revision
+      type: string
+    - default: main
+      description: The target branch for the push
+      name: target-branch
+      type: string
+    - default: "false"
+      description: Optional Concert enablement setting for generating and uploading ConcertDef files.  Default is "false".
+      name: if-concert-enabled
+      type: string
+    - default: "1.0.0"
+      description: Optional Concert setting for the ConcertDef component version.  Default is "1.0.0".
+      name: concert-component-version
+      type: string
+    - default: ""
+      description: Optional Concert setting for the base DOMAIN of the API service.  When the value is an empty string, it will be "{serviceName.nameSpace.svc}" per the Kubernetes service name and namespace in use.
+      name: concert-api-base
+      type: string
+    - default: "private"
+      description: Optional Concert setting for the API exposure.
+      name: concert-api-exposure
+      type: string
+  tasks:
+    - name: clone-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.revision)
+        - name: fetchTags
+          value: "true"
+        - name: depth
+          value: "2"
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: workspace
+        - name: basic-auth
+          workspace: git-auth
+    - name: concert-upload-cd
+      onError: continue
+      params:
+        - name: event-type
+          value: $(params.event-type)
+        - name: source-url
+          value: $(tasks.clone-repository.results.url)
+        - name: source-commit
+          value: $(tasks.clone-repository.results.commit)
+        - name: source-commit-timestamp
+          value: $(tasks.clone-repository.results.commit-timestamp)
+        - name: if-concert-enabled
+          value: $(params.if-concert-enabled)
+        - name: concert-component-version
+          value: $(params.concert-component-version)
+        - name: concert-api-base
+          value: $(params.concert-api-base)
+        - name: concert-api-exposure
+          value: $(params.concert-api-exposure)
+      runAfter:
+        - clone-repository
+      taskRef:
+        kind: Task
+        name: concert-upload-cd
+      when:
+        - input: $(params.event-type)
+          operator: notin
+          values:
+            - pull_request
+      workspaces:
+        - name: concert-api
+          workspace: concert-api
+        - name: workspace
+          workspace: workspace
+  workspaces:
+    - name: workspace
+    - name: git-auth
+      optional: true
+    - name: concert-api
